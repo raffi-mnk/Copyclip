@@ -185,29 +185,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func showAbout() {
         if aboutWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 340, height: 220),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 380),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "About Copyclip"
-            if let content = window.contentView {
-                let icon = NSImageView(frame: NSRect(x: 134, y: 112, width: 72, height: 72))
-                icon.image = NSImage(named: "AppIcon") ?? NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
-                content.addSubview(icon)
-                let title = NSTextField(labelWithString: "Copyclip")
-                title.font = .boldSystemFont(ofSize: 20)
-                title.alignment = .center
-                title.frame = NSRect(x: 20, y: 82, width: 300, height: 27)
-                content.addSubview(title)
-                let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
-                let subtitle = NSTextField(labelWithString: "Version \(version) · Local clipboard history")
-                subtitle.alignment = .center
-                subtitle.textColor = .secondaryLabelColor
-                subtitle.frame = NSRect(x: 20, y: 58, width: 300, height: 20)
-                content.addSubview(subtitle)
-                let detail = NSTextField(labelWithString: "Your clips stay on this Mac.")
-                detail.alignment = .center
-                detail.frame = NSRect(x: 20, y: 28, width: 300, height: 20)
-                content.addSubview(detail)
-            }
+            let content = GlassStyle.prepare(window)
+            GlassStyle.label("About Copyclip", in: content,
+                             frame: NSRect(x: 32, y: 297, width: 350, height: 40),
+                             size: 27, weight: .bold)
+            GlassStyle.label("A little more room for what matters.", in: content,
+                             frame: NSRect(x: 33, y: 272, width: 350, height: 20),
+                             size: 13, color: .secondaryLabelColor)
+            let card = GlassStyle.card(NSRect(x: 24, y: 30, width: 372, height: 224), in: content)
+            let icon = NSImageView(frame: NSRect(x: 146, y: 125, width: 80, height: 80))
+            icon.image = NSImage(named: "AppIcon") ?? NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
+            icon.imageScaling = .scaleProportionallyUpOrDown
+            card.addSubview(icon)
+            let title = GlassStyle.label("Copyclip", in: card,
+                                         frame: NSRect(x: 24, y: 87, width: 324, height: 30),
+                                         size: 22, weight: .bold)
+            title.alignment = .center
+            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+            let subtitle = GlassStyle.label("Version \(version)  ·  Local clipboard history", in: card,
+                                            frame: NSRect(x: 24, y: 61, width: 324, height: 19),
+                                            size: 12, color: .secondaryLabelColor)
+            subtitle.alignment = .center
+            let detail = GlassStyle.label("Your clips stay on this Mac.", in: card,
+                                          frame: NSRect(x: 24, y: 27, width: 324, height: 20), size: 13)
+            detail.alignment = .center
             window.center()
             aboutWindow = window
         }

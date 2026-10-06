@@ -1,11 +1,43 @@
 import AppKit
 
+private final class ClipRowView: NSTableRowView {
+    override func drawSelection(in dirtyRect: NSRect) {
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 4, dy: 2), xRadius: 10, yRadius: 10)
+        NSColor.controlAccentColor.withAlphaComponent(0.22).setFill()
+        path.fill()
+    }
+}
+
+private final class ClipCellView: NSTableCellView {
+    let titleField = NSTextField(labelWithString: "")
+    let sourceField = NSTextField(labelWithString: "")
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        identifier = NSUserInterfaceItemIdentifier("ClipCell")
+        titleField.frame = NSRect(x: 10, y: 26, width: 230, height: 19)
+        titleField.autoresizingMask = [.width]
+        titleField.lineBreakMode = .byTruncatingTail
+        titleField.font = .systemFont(ofSize: 13, weight: .medium)
+        addSubview(titleField)
+        sourceField.frame = NSRect(x: 10, y: 8, width: 258, height: 16)
+        sourceField.autoresizingMask = [.width]
+        sourceField.lineBreakMode = .byTruncatingTail
+        sourceField.font = .systemFont(ofSize: 11)
+        sourceField.textColor = .secondaryLabelColor
+        addSubview(sourceField)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+}
+
 final class HistoryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate,
                                      NSSearchFieldDelegate, NSTextViewDelegate {
     private let store: ClipboardStore
     private let onCopy: (ClipboardItem) -> Void
     private let historyLimit: () -> Int
     private var filtered: [ClipboardItem] = []
+    private var fittedTitleCache: [UUID: String] = [:]
     private let table = NSTableView()
     private let search = NSSearchField()
     private let detail = NSTextField(labelWithString: "")
@@ -27,11 +59,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         self.historyLimit = historyLimit
         self.onCopy = onCopy
         self.filtered = store.items
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 550),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 680),
                               styleMask: [.titled, .closable, .resizable, .miniaturizable],
                               backing: .buffered, defer: false)
         window.title = "Clips Management"
-        window.minSize = NSSize(width: 780, height: 430)
+        window.minSize = NSSize(width: 900, height: 570)
         super.init(window: window)
         buildUI()
         window.center()
@@ -44,53 +76,87 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     func focusSearch() { window?.makeFirstResponder(search) }
 
     private func buildUI() {
-        guard let content = window?.contentView else { return }
+        guard let window else { return }
+        let content = GlassStyle.prepare(window)
         let width = content.bounds.width
         let height = content.bounds.height
+        GlassStyle.label("Clips Management", in: content,
+                         frame: NSRect(x: 32, y: height - 90, width: 570, height: 40),
+                         size: 27, weight: .bold).autoresizingMask = [.minYMargin]
+        GlassStyle.label("Find, organize, and reuse everything you copy.", in: content,
+                         frame: NSRect(x: 33, y: height - 114, width: 570, height: 20),
+                         size: 13, color: .secondaryLabelColor).autoresizingMask = [.minYMargin]
 
-        search.frame = NSRect(x: 20, y: height - 54, width: width - 40, height: 30)
+        let cardHeight = height - 163
+        let listCard = GlassStyle.card(NSRect(x: 24, y: 24, width: 310, height: cardHeight),
+                                       in: content, autoresizing: [.height])
+        GlassStyle.sectionLabel("Your clips", in: listCard,
+                                frame: NSRect(x: 20, y: cardHeight - 31, width: 250, height: 16))
+            .autoresizingMask = [.minYMargin]
+        search.frame = NSRect(x: 16, y: cardHeight - 76, width: 278, height: 34)
         search.placeholderString = "Search clips, names, or source apps"
         search.delegate = self
-        search.autoresizingMask = [.width, .minYMargin]
-        content.addSubview(search)
+        search.autoresizingMask = [.minYMargin]
+        listCard.addSubview(search)
 
-        let listScroll = NSScrollView(frame: NSRect(x: 20, y: 70, width: 300, height: height - 136))
+        let listScroll = NSScrollView(frame: NSRect(x: 12, y: 58, width: 286, height: cardHeight - 143))
         listScroll.autoresizingMask = [.height]
         listScroll.hasVerticalScroller = true
-        listScroll.borderType = .bezelBorder
+        listScroll.verticalScrollElasticity = .none
+        listScroll.horizontalScrollElasticity = .none
+        listScroll.borderType = .noBorder
+        listScroll.drawsBackground = false
         table.headerView = nil
-        table.rowHeight = 37
+        table.rowHeight = 54
+        table.backgroundColor = .clear
         table.delegate = self
         table.dataSource = self
         table.target = self
         table.doubleAction = #selector(copySelected)
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("clip"))
-        column.width = 296
+        column.width = 282
         table.addTableColumn(column)
         listScroll.documentView = table
-        content.addSubview(listScroll)
+        listCard.addSubview(listScroll)
 
-        detail.frame = NSRect(x: 340, y: height - 93, width: width - 360, height: 25)
+        let deleteAll = GlassStyle.button("Delete All History…", symbol: "trash", target: self,
+                                          action: #selector(deleteAllHistory))
+        deleteAll.frame = NSRect(x: 18, y: 16, width: 195, height: 32)
+        listCard.addSubview(deleteAll)
+
+        let previewWidth = width - 374
+        let preview = GlassStyle.card(NSRect(x: 350, y: 24, width: previewWidth, height: cardHeight),
+                                      in: content, autoresizing: [.width, .height])
+        GlassStyle.sectionLabel("Clip preview", in: preview,
+                                frame: NSRect(x: 24, y: cardHeight - 31, width: 320, height: 16))
+            .autoresizingMask = [.minYMargin]
+        detail.frame = NSRect(x: 24, y: cardHeight - 65, width: previewWidth - 48, height: 29)
         detail.autoresizingMask = [.width, .minYMargin]
-        detail.font = .systemFont(ofSize: 12)
-        detail.textColor = .secondaryLabelColor
+        detail.font = .systemFont(ofSize: 20, weight: .semibold)
         detail.lineBreakMode = .byTruncatingMiddle
-        content.addSubview(detail)
+        preview.addSubview(detail)
 
-        sourceDetail.frame = NSRect(x: 340, y: height - 119, width: width - 360, height: 21)
+        sourceDetail.frame = NSRect(x: 24, y: cardHeight - 89, width: previewWidth - 48, height: 20)
         sourceDetail.autoresizingMask = [.width, .minYMargin]
         sourceDetail.font = .systemFont(ofSize: 12)
         sourceDetail.textColor = .secondaryLabelColor
         sourceDetail.lineBreakMode = .byTruncatingMiddle
-        content.addSubview(sourceDetail)
+        preview.addSubview(sourceDetail)
 
-        textScroll.frame = NSRect(x: 340, y: 145, width: width - 360, height: height - 280)
+        let editorFrame = NSRect(x: 20, y: 143, width: previewWidth - 40, height: cardHeight - 250)
+        let editorWell = GlassWellView(frame: editorFrame)
+        editorWell.autoresizingMask = [.width, .height]
+        preview.addSubview(editorWell)
+        textScroll.frame = editorFrame.insetBy(dx: 3, dy: 3)
         textScroll.autoresizingMask = [.width, .height]
-        textScroll.borderType = .bezelBorder
+        textScroll.borderType = .noBorder
+        textScroll.drawsBackground = false
         textScroll.hasVerticalScroller = true
+        textScroll.verticalScrollElasticity = .none
         textScroll.hasHorizontalScroller = false
         textView.isRichText = false
         textView.isEditable = false
+        textView.drawsBackground = false
         textView.font = .systemFont(ofSize: 14)
         textView.frame = NSRect(origin: .zero, size: textScroll.contentSize)
         textView.minSize = NSSize(width: 0, height: textScroll.contentSize.height)
@@ -102,56 +168,66 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         textView.textContainerInset = NSSize(width: 10, height: 10)
         textView.delegate = self
         textScroll.documentView = textView
-        content.addSubview(textScroll)
+        preview.addSubview(textScroll)
 
         imageView.frame = textScroll.frame
         imageView.autoresizingMask = [.width, .height]
         imageView.imageScaling = .scaleProportionallyDown
         imageView.isHidden = true
-        content.addSubview(imageView)
+        preview.addSubview(imageView)
 
-        note.frame = NSRect(x: 340, y: 116, width: width - 360, height: 21)
+        note.frame = NSRect(x: 24, y: 116, width: previewWidth - 48, height: 19)
         note.autoresizingMask = [.width]
         note.font = .systemFont(ofSize: 11)
         note.textColor = .secondaryLabelColor
-        content.addSubview(note)
+        preview.addSubview(note)
 
         copyButton.title = "Copy to Clipboard"
+        copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
+        copyButton.imagePosition = .imageLeading
+        copyButton.bezelStyle = .rounded
+        copyButton.controlSize = .large
+        GlassStyle.primary(copyButton)
         copyButton.target = self
         copyButton.action = #selector(copySelected)
-        copyButton.frame = NSRect(x: 340, y: 70, width: 145, height: 30)
-        content.addSubview(copyButton)
+        copyButton.frame = NSRect(x: 20, y: 66, width: 170, height: 34)
+        preview.addSubview(copyButton)
 
         saveButton.title = "Save Changes"
+        saveButton.bezelStyle = .rounded
+        saveButton.controlSize = .large
         saveButton.target = self
         saveButton.action = #selector(saveChanges)
-        saveButton.frame = NSRect(x: 490, y: 70, width: 125, height: 30)
-        content.addSubview(saveButton)
+        saveButton.frame = NSRect(x: 196, y: 66, width: 132, height: 34)
+        preview.addSubview(saveButton)
 
         deleteButton.title = "Delete Clip"
+        deleteButton.bezelStyle = .rounded
+        deleteButton.controlSize = .large
         deleteButton.target = self
         deleteButton.action = #selector(deleteSelected)
-        deleteButton.frame = NSRect(x: 620, y: 70, width: 110, height: 30)
-        content.addSubview(deleteButton)
+        deleteButton.frame = NSRect(x: 334, y: 66, width: 122, height: 34)
+        preview.addSubview(deleteButton)
 
+        pinButton.bezelStyle = .rounded
+        pinButton.controlSize = .large
         pinButton.target = self
         pinButton.action = #selector(togglePin)
-        pinButton.frame = NSRect(x: 340, y: 29, width: 135, height: 30)
-        content.addSubview(pinButton)
+        pinButton.frame = NSRect(x: 20, y: 20, width: 170, height: 34)
+        preview.addSubview(pinButton)
 
         renameButton.title = "Rename…"
+        renameButton.bezelStyle = .rounded
+        renameButton.controlSize = .large
         renameButton.target = self
         renameButton.action = #selector(renameSelected)
-        renameButton.frame = NSRect(x: 480, y: 29, width: 105, height: 30)
-        content.addSubview(renameButton)
-
-        let deleteAll = NSButton(title: "Delete All History…", target: self, action: #selector(deleteAllHistory))
-        deleteAll.frame = NSRect(x: 20, y: 25, width: 165, height: 30)
-        content.addSubview(deleteAll)
+        renameButton.frame = NSRect(x: 196, y: 20, width: 132, height: 34)
+        preview.addSubview(renameButton)
     }
 
     func reload() {
         let selectedID = selectedItem?.id
+        fittedTitleCache.removeAll(keepingCapacity: true)
         let query = search.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         filtered = query.isEmpty ? store.items : store.items.filter {
             $0.displayTitle.localizedCaseInsensitiveContains(query)
@@ -175,7 +251,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func updateDetail() {
         guard let item = selectedItem else {
-            detail.stringValue = "Select a clip to inspect it"
+            detail.stringValue = "Select a clip"
             sourceDetail.stringValue = ""
             textView.string = ""
             textView.isEditable = false
@@ -192,11 +268,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
 
         let date = DateFormatter.localizedString(from: item.copiedAt, dateStyle: .medium, timeStyle: .short)
-        detail.stringValue = "Copied \(date)"
+        detail.stringValue = item.displayTitle
         if let name = item.sourceAppName, let bundleID = item.sourceBundleIdentifier {
-            sourceDetail.stringValue = "Source: \(name)  ·  \(bundleID)"
+            sourceDetail.stringValue = "Copied \(date)  ·  \(name)  ·  \(bundleID)"
         } else {
-            sourceDetail.stringValue = "Source: \(item.sourceDisplayName)"
+            sourceDetail.stringValue = "Copied \(date)  ·  \(item.sourceDisplayName)"
         }
         copyButton.isEnabled = true
         deleteButton.isEnabled = true
@@ -240,14 +316,55 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     func numberOfRows(in tableView: NSTableView) -> Int { filtered.count }
 
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let identifier = NSUserInterfaceItemIdentifier("ClipRow")
+        if let existing = tableView.makeView(withIdentifier: identifier, owner: self) as? ClipRowView {
+            return existing
+        }
+        let view = ClipRowView()
+        view.identifier = identifier
+        return view
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let item = filtered[row]
-        let label = NSTextField(labelWithString: item.isPinned ? "📌  \(item.displayTitle)" : item.displayTitle)
-        label.frame = NSRect(x: 8, y: 5, width: tableView.bounds.width - 16, height: 26)
-        label.autoresizingMask = [.width]
-        label.lineBreakMode = .byTruncatingTail
-        label.font = .systemFont(ofSize: 13)
-        return label
+        let identifier = NSUserInterfaceItemIdentifier("ClipCell")
+        let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? ClipCellView
+            ?? ClipCellView(frame: NSRect(x: 0, y: 0, width: 282, height: 54))
+        if let cached = fittedTitleCache[item.id] {
+            cell.titleField.stringValue = cached
+        } else {
+            let fullTitle = item.isPinned ? "📌  \(item.displayTitle)" : item.displayTitle
+            let title = fittedTitle(fullTitle,
+                                    font: cell.titleField.font ?? .systemFont(ofSize: 13, weight: .medium),
+                                    width: 225)
+            fittedTitleCache[item.id] = title
+            cell.titleField.stringValue = title
+        }
+        cell.sourceField.stringValue = item.sourceDisplayName
+        return cell
+    }
+
+    private func fittedTitle(_ title: String, font: NSFont, width: CGFloat) -> String {
+        let attributes: [NSAttributedString.Key: Any] = [.font: font]
+        let characters = Array(title.prefix(96))
+        let clipped = String(characters)
+        let hasMore = !title.dropFirst(96).isEmpty
+        if !hasMore && (clipped as NSString).size(withAttributes: attributes).width <= width {
+            return clipped
+        }
+        var lower = 0
+        var upper = characters.count
+        while lower < upper {
+            let middle = (lower + upper + 1) / 2
+            let candidate = String(characters.prefix(middle)) + "…"
+            if (candidate as NSString).size(withAttributes: attributes).width <= width {
+                lower = middle
+            } else {
+                upper = middle - 1
+            }
+        }
+        return String(characters.prefix(lower)) + "…"
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) { updateDetail() }
