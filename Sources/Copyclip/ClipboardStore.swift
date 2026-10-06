@@ -9,8 +9,54 @@ struct ClipboardRepresentation: Codable {
 struct ClipboardItem: Codable, Identifiable {
     let id: UUID
     let copiedAt: Date
-    let preview: String
-    let representations: [ClipboardRepresentation]
+    var preview: String
+    var representations: [ClipboardRepresentation]
+    let sourceBundleIdentifier: String?
+    let sourceAppName: String?
+    var customTitle: String?
+    var isPinned: Bool
+
+    init(id: UUID, copiedAt: Date, preview: String, representations: [ClipboardRepresentation],
+         sourceBundleIdentifier: String? = nil, sourceAppName: String? = nil,
+         customTitle: String? = nil, isPinned: Bool = false) {
+        self.id = id
+        self.copiedAt = copiedAt
+        self.preview = preview
+        self.representations = representations
+        self.sourceBundleIdentifier = sourceBundleIdentifier
+        self.sourceAppName = sourceAppName
+        self.customTitle = customTitle
+        self.isPinned = isPinned
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, copiedAt, preview, representations, sourceBundleIdentifier, sourceAppName, customTitle, isPinned
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        copiedAt = try values.decode(Date.self, forKey: .copiedAt)
+        preview = try values.decode(String.self, forKey: .preview)
+        representations = try values.decode([ClipboardRepresentation].self, forKey: .representations)
+        sourceBundleIdentifier = try values.decodeIfPresent(String.self, forKey: .sourceBundleIdentifier)
+        sourceAppName = try values.decodeIfPresent(String.self, forKey: .sourceAppName)
+        customTitle = try values.decodeIfPresent(String.self, forKey: .customTitle)
+        isPinned = try values.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+    }
+
+    var displayTitle: String {
+        guard let customTitle, !customTitle.isEmpty else { return preview }
+        return customTitle
+    }
+
+    var sourceDisplayName: String { sourceAppName ?? sourceBundleIdentifier ?? "Unknown app" }
+
+    var editableText: String? {
+        guard let representation = representations.first(where: { $0.type == NSPasteboard.PasteboardType.string.rawValue }) else { return nil }
+        return String(data: representation.data, encoding: .utf8)
+            ?? String(data: representation.data, encoding: .utf16)
+    }
 
     var signature: Int {
         var hasher = Hasher()
@@ -24,24 +70,41 @@ struct ClipboardItem: Codable, Identifiable {
 
 final class ClipboardStore {
     private(set) var items: [ClipboardItem] = []
-    private let fileURL: URL
-    private let saveQueue = DispatchQueue(label: "app.copyclip.persistence")
+    var onChange: (() -> Void)?
+    private let legacyURL: URL
+    private let indexURL: URL
+    private let entriesDirectory: URL
+    private let saveQueue = DispatchQueue(label: "app.copyclip.persistence", qos: .utility)
 
     init(fileURL: URL? = nil) {
         let defaultDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Copyclip", isDirectory: true)
         let directory = fileURL?.deletingLastPathComponent() ?? defaultDirectory
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        self.fileURL = fileURL ?? directory.appendingPathComponent("History.plist")
-        if let data = try? Data(contentsOf: self.fileURL),
-           let loaded = try? PropertyListDecoder().decode([ClipboardItem].self, from: data) {
+        legacyURL = fileURL ?? directory.appendingPathComponent("History.plist")
+        indexURL = directory.appendingPathComponent("HistoryIndex.plist")
+        entriesDirectory = directory.appendingPathComponent("Clips", isDirectory: true)
+        try? FileManager.default.createDirectory(at: entriesDirectory, withIntermediateDirectories: true)
+
+        if let data = try? Data(contentsOf: indexURL),
+           let ids = try? PropertyListDecoder().decode([UUID].self, from: data) {
+            items = ids.compactMap { id in
+                let url = entriesDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("plist")
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return try? PropertyListDecoder().decode(ClipboardItem.self, from: data)
+            }
+        } else if let data = try? Data(contentsOf: legacyURL),
+                  let loaded = try? PropertyListDecoder().decode([ClipboardItem].self, from: data) {
             items = loaded
+            migrateLegacyHistory()
         }
     }
 
-    func capture(from pasteboard: NSPasteboard) -> Bool {
-        guard let pasteboardItems = pasteboard.pasteboardItems, !pasteboardItems.isEmpty else { return false }
+    var pinnedItems: [ClipboardItem] { items.filter(\.isPinned) }
 
+    func capture(from pasteboard: NSPasteboard, sourceBundleIdentifier: String? = nil,
+                 sourceAppName: String? = nil, maxItems: Int = 0) -> Bool {
+        guard let pasteboardItems = pasteboard.pasteboardItems, !pasteboardItems.isEmpty else { return false }
         let privateTypes: Set<String> = [
             "org.nspasteboard.TransientType",
             "org.nspasteboard.ConcealedType",
@@ -58,19 +121,18 @@ final class ClipboardStore {
                     representations.append(ClipboardRepresentation(type: type.rawValue, data: data))
                 }
             }
-            // Preserve the boundaries between multiple pasteboard items.
             representations.append(ClipboardRepresentation(type: "app.copyclip.item-break", data: Data()))
         }
         guard representations.count > pasteboardItems.count else { return false }
 
-        let newItem = ClipboardItem(
-            id: UUID(), copiedAt: Date(),
-            preview: Self.preview(for: pasteboard),
-            representations: representations
-        )
+        let newItem = ClipboardItem(id: UUID(), copiedAt: Date(), preview: Self.preview(for: pasteboard),
+                                    representations: representations, sourceBundleIdentifier: sourceBundleIdentifier,
+                                    sourceAppName: sourceAppName)
         if items.first?.signature == newItem.signature { return false }
         items.insert(newItem, at: 0)
-        save()
+        let removed = trimToLimit(maxItems)
+        persist(item: newItem, removedIDs: removed, updateIndex: true)
+        onChange?()
         return true
     }
 
@@ -91,30 +153,109 @@ final class ClipboardStore {
         pasteboard.writeObjects(result)
     }
 
+    func setPinned(id: UUID, to pinned: Bool) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index].isPinned = pinned
+        persist(item: items[index])
+        onChange?()
+    }
+
+    func rename(id: UUID, to title: String) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        items[index].customTitle = cleaned.isEmpty ? nil : cleaned
+        persist(item: items[index])
+        onChange?()
+    }
+
+    func editText(id: UUID, to text: String) {
+        guard let index = items.firstIndex(where: { $0.id == id }), items[index].editableText != nil else { return }
+        let pasteboardItem = NSPasteboardItem()
+        pasteboardItem.setString(text, forType: .string)
+        guard let data = pasteboardItem.data(forType: .string) else { return }
+        items[index].representations = [
+            ClipboardRepresentation(type: NSPasteboard.PasteboardType.string.rawValue, data: data),
+            ClipboardRepresentation(type: "app.copyclip.item-break", data: Data())
+        ]
+        items[index].preview = Self.cleanPreview(text)
+        persist(item: items[index])
+        onChange?()
+    }
+
+    func delete(id: UUID) {
+        guard items.contains(where: { $0.id == id }) else { return }
+        items.removeAll { $0.id == id }
+        persist(removedIDs: [id], updateIndex: true)
+        onChange?()
+    }
+
     func deleteAll() {
+        let removed = items.map(\.id)
         items.removeAll()
-        save()
+        persist(removedIDs: removed, updateIndex: true)
+        onChange?()
     }
 
-    func flush() {
-        saveQueue.sync { }
+    func enforceLimit(_ limit: Int) {
+        let removed = trimToLimit(limit)
+        guard !removed.isEmpty else { return }
+        persist(removedIDs: removed, updateIndex: true)
+        onChange?()
     }
 
-    private func save() {
-        let snapshot = items
-        let destination = fileURL
-        saveQueue.async {
-            guard let data = try? PropertyListEncoder().encode(snapshot) else { return }
-            try? data.write(to: destination, options: .atomic)
+    func flush() { saveQueue.sync { } }
+
+    private func trimToLimit(_ limit: Int) -> [UUID] {
+        guard limit > 0 else { return [] }
+        var removed: [UUID] = []
+        while items.count > limit, let index = items.lastIndex(where: { !$0.isPinned }) {
+            removed.append(items.remove(at: index).id)
         }
+        return removed
+    }
+
+    private func persist(item: ClipboardItem? = nil, removedIDs: [UUID] = [], updateIndex: Bool = false) {
+        let ids = updateIndex ? items.map(\.id) : []
+        let directory = entriesDirectory
+        let index = indexURL
+        saveQueue.async {
+            do {
+                if let item {
+                    let url = directory.appendingPathComponent(item.id.uuidString).appendingPathExtension("plist")
+                    try Self.encoded(item).write(to: url, options: .atomic)
+                }
+                if updateIndex { try Self.encoded(ids).write(to: index, options: .atomic) }
+                for id in removedIDs {
+                    let url = directory.appendingPathComponent(id.uuidString).appendingPathExtension("plist")
+                    try? FileManager.default.removeItem(at: url)
+                }
+            } catch {
+                // Keep the previous on-disk index and clip files if a write fails.
+            }
+        }
+    }
+
+    private func migrateLegacyHistory() {
+        do {
+            for item in items {
+                let url = entriesDirectory.appendingPathComponent(item.id.uuidString).appendingPathExtension("plist")
+                try Self.encoded(item).write(to: url, options: .atomic)
+            }
+            try Self.encoded(items.map(\.id)).write(to: indexURL, options: .atomic)
+            try? FileManager.default.removeItem(at: legacyURL)
+        } catch {
+            // Keep the old single-file history as the recovery copy if migration fails.
+        }
+    }
+
+    private static func encoded<T: Encodable>(_ value: T) throws -> Data {
+        let encoder = PropertyListEncoder()
+        encoder.outputFormat = .binary
+        return try encoder.encode(value)
     }
 
     private static func preview(for pasteboard: NSPasteboard) -> String {
-        if let text = pasteboard.string(forType: .string) {
-            let cleaned = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !cleaned.isEmpty { return cleaned }
-        }
+        if let text = pasteboard.string(forType: .string) { return cleanPreview(text) }
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
            let first = urls.first {
             return urls.count == 1 ? first.lastPathComponent : "\(urls.count) files"
@@ -122,5 +263,11 @@ final class ClipboardStore {
         if pasteboard.canReadItem(withDataConformingToTypes: ["public.image"]) { return "Image" }
         if pasteboard.canReadItem(withDataConformingToTypes: ["public.rtf"]) { return "Formatted text" }
         return "Clipboard item"
+    }
+
+    private static func cleanPreview(_ text: String) -> String {
+        let cleaned = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? "Empty text" : cleaned
     }
 }

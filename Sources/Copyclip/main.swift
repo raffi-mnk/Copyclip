@@ -1,35 +1,61 @@
 import AppKit
-import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let store = ClipboardStore()
+    private let settings = AppSettings()
     private let pasteboard = NSPasteboard.general
     private var lastChangeCount = 0
     private var timer: Timer?
     private var statusItem: NSStatusItem!
-    private var preferencesWindow: NSWindow?
+    private var preferencesController: PreferencesWindowController?
+    private var historyController: HistoryWindowController?
+    private var aboutWindow: NSWindow?
     private let menu = NSMenu()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "paperclip", accessibilityDescription: "Copyclip")
-            button.toolTip = "Copyclip"
-        }
+        statusItem = NSStatusBar.system.statusItem(withLength: 22)
+        updateStatusIcon()
+        store.onChange = { [weak self] in self?.historyController?.reload() }
+        store.enforceLimit(settings.historyLimit)
         menu.delegate = self
         statusItem.menu = menu
         lastChangeCount = pasteboard.changeCount
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.checkClipboard()
+        updateMonitoring()
+    }
+
+    private func updateStatusIcon() {
+        if let button = statusItem.button {
+            let name = settings.privateModeEnabled ? "eye.slash" : "paperclip"
+            let symbol = NSImage(systemSymbolName: name, accessibilityDescription: "Copyclip")?
+                .withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
+            symbol?.isTemplate = true
+            button.image = symbol
+            button.imagePosition = .imageOnly
+            button.toolTip = settings.privateModeEnabled ? "Copyclip — Private Mode" : "Copyclip"
         }
     }
 
+    private func updateMonitoring() {
+        timer?.invalidate()
+        timer = nil
+        guard !settings.privateModeEnabled else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.checkClipboard()
+        }
+        timer?.tolerance = 0.2
+    }
+
     private func checkClipboard() {
+        guard !settings.privateModeEnabled else { return }
         let changeCount = pasteboard.changeCount
         guard changeCount != lastChangeCount else { return }
         lastChangeCount = changeCount
-        _ = store.capture(from: pasteboard)
+        let source = NSWorkspace.shared.frontmostApplication
+        guard !settings.ignores(bundleID: source?.bundleIdentifier) else { return }
+        _ = store.capture(from: pasteboard, sourceBundleIdentifier: source?.bundleIdentifier,
+                          sourceAppName: source?.localizedName,
+                          maxItems: settings.historyLimit)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -37,9 +63,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        checkClipboard()
         menu.removeAllItems()
-        let heading = NSMenuItem(title: "Select the clip you want to add to your clipboard", action: nil, keyEquivalent: "")
+        let heading = NSMenuItem(title: settings.privateModeEnabled ? "Private Mode — recording paused" : "Select a clip to add to your clipboard", action: nil, keyEquivalent: "")
         heading.isEnabled = false
         menu.addItem(heading)
         menu.addItem(.separator())
@@ -49,17 +74,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             empty.isEnabled = false
             menu.addItem(empty)
         } else {
-            for (index, item) in store.items.prefix(20).enumerated() {
-                let title = item.preview.count > 48 ? String(item.preview.prefix(47)) + "…" : item.preview
-                let entry = NSMenuItem(title: title, action: #selector(selectClip(_:)), keyEquivalent: index < 10 ? String(index) : "")
-                entry.target = self
-                entry.representedObject = item.id.uuidString
-                menu.addItem(entry)
+            let pinned = store.pinnedItems
+            let remaining = max(0, settings.menuLimit - pinned.count)
+            let recent = Array(store.items.filter { !$0.isPinned }.prefix(remaining))
+            var shortcutIndex = 0
+            if !pinned.isEmpty {
+                let label = NSMenuItem(title: "Pinned", action: nil, keyEquivalent: "")
+                label.isEnabled = false
+                menu.addItem(label)
+                for item in pinned {
+                    addClip(item, shortcutIndex: shortcutIndex, to: menu)
+                    shortcutIndex += 1
+                }
             }
-            let more = NSMenuItem(title: "Search All History…", action: #selector(showHistory), keyEquivalent: "")
-            more.target = self
-            menu.addItem(more)
+            if !pinned.isEmpty && !recent.isEmpty { menu.addItem(.separator()) }
+            for item in recent {
+                addClip(item, shortcutIndex: shortcutIndex, to: menu)
+                shortcutIndex += 1
+            }
         }
+
+        menu.addItem(.separator())
+        let manage = NSMenuItem(title: "Clips Management…", action: #selector(showHistory), keyEquivalent: "")
+        manage.target = self
+        menu.addItem(manage)
+
+        let privacy = NSMenuItem(title: "Private Mode", action: #selector(togglePrivateMode), keyEquivalent: "p")
+        privacy.target = self
+        privacy.state = settings.privateModeEnabled ? .on : .off
+        menu.addItem(privacy)
 
         menu.addItem(.separator())
         let delete = NSMenuItem(title: "Delete All History…", action: #selector(deleteHistory), keyEquivalent: "")
@@ -70,10 +113,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let preferences = NSMenuItem(title: "Preferences…", action: #selector(showPreferences), keyEquivalent: ",")
         preferences.target = self
         menu.addItem(preferences)
+        let about = NSMenuItem(title: "About Copyclip", action: #selector(showAbout), keyEquivalent: "")
+        about.target = self
+        menu.addItem(about)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit Copyclip", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
+    }
+
+    private func addClip(_ item: ClipboardItem, shortcutIndex: Int, to menu: NSMenu) {
+        let title = item.displayTitle.count > 48 ? String(item.displayTitle.prefix(47)) + "…" : item.displayTitle
+        let entry = NSMenuItem(title: title, action: #selector(selectClip(_:)),
+                               keyEquivalent: shortcutIndex < 10 ? String(shortcutIndex) : "")
+        entry.target = self
+        entry.representedObject = item.id.uuidString
+        entry.toolTip = "Copied from \(item.sourceDisplayName)"
+        if item.isPinned { entry.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Pinned") }
+        menu.addItem(entry)
+    }
+
+    @objc private func togglePrivateMode() {
+        settings.privateModeEnabled.toggle()
+        lastChangeCount = pasteboard.changeCount
+        updateStatusIcon()
+        updateMonitoring()
     }
 
     @objc private func selectClip(_ sender: NSMenuItem) {
@@ -94,131 +158,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func showPreferences() {
-        if preferencesWindow == nil { preferencesWindow = makePreferencesWindow() }
-        preferencesWindow?.center()
-        preferencesWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    private func makePreferencesWindow() -> NSWindow {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 190),
-                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.title = "Copyclip Preferences"
-        let content = NSView(frame: window.contentView!.bounds)
-        content.autoresizingMask = [.width, .height]
-        window.contentView = content
-
-        let title = NSTextField(labelWithString: "Clipboard history")
-        title.font = .boldSystemFont(ofSize: 16)
-        title.frame = NSRect(x: 24, y: 132, width: 370, height: 24)
-        content.addSubview(title)
-
-        let detail = NSTextField(wrappingLabelWithString: "Clips are saved locally and remain available after Copyclip or your Mac restarts.")
-        detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 24, y: 77, width: 370, height: 46)
-        content.addSubview(detail)
-
-        let login = NSButton(checkboxWithTitle: "Launch Copyclip at login", target: self, action: #selector(toggleLogin(_:)))
-        login.frame = NSRect(x: 24, y: 34, width: 370, height: 26)
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        content.addSubview(login)
-        return window
-    }
-
-    @objc private func toggleLogin(_ sender: NSButton) {
-        do {
-            if sender.state == .on { try SMAppService.mainApp.register() }
-            else { try SMAppService.mainApp.unregister() }
-        } catch {
-            sender.state = sender.state == .on ? .off : .on
-            let alert = NSAlert(error: error)
-            alert.runModal()
+        if preferencesController == nil {
+            preferencesController = PreferencesWindowController(settings: settings) { [weak self] limit in
+                self?.store.enforceLimit(limit)
+            }
         }
+        preferencesController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func showHistory() {
-        let controller = HistoryWindowController(store: store) { [weak self] item in
-            guard let self else { return }
-            self.store.restore(item, to: self.pasteboard)
-            self.lastChangeCount = self.pasteboard.changeCount
+        if historyController == nil {
+            historyController = HistoryWindowController(store: store, historyLimit: { [weak self] in
+                self?.settings.historyLimit ?? 0
+            }) { [weak self] item in
+                guard let self else { return }
+                self.store.restore(item, to: self.pasteboard)
+                self.lastChangeCount = self.pasteboard.changeCount
+            }
         }
-        historyController = controller
-        controller.showWindow(nil)
+        historyController?.reload()
+        historyController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        historyController?.focusSearch()
+    }
+
+    @objc private func showAbout() {
+        if aboutWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 340, height: 220),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.title = "About Copyclip"
+            if let content = window.contentView {
+                let icon = NSImageView(frame: NSRect(x: 134, y: 112, width: 72, height: 72))
+                icon.image = NSImage(named: "AppIcon") ?? NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
+                content.addSubview(icon)
+                let title = NSTextField(labelWithString: "Copyclip")
+                title.font = .boldSystemFont(ofSize: 20)
+                title.alignment = .center
+                title.frame = NSRect(x: 20, y: 82, width: 300, height: 27)
+                content.addSubview(title)
+                let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+                let subtitle = NSTextField(labelWithString: "Version \(version) · Local clipboard history")
+                subtitle.alignment = .center
+                subtitle.textColor = .secondaryLabelColor
+                subtitle.frame = NSRect(x: 20, y: 58, width: 300, height: 20)
+                content.addSubview(subtitle)
+                let detail = NSTextField(labelWithString: "Your clips stay on this Mac.")
+                detail.alignment = .center
+                detail.frame = NSRect(x: 20, y: 28, width: 300, height: 20)
+                content.addSubview(detail)
+            }
+            window.center()
+            aboutWindow = window
+        }
+        aboutWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private var historyController: HistoryWindowController?
-
     @objc private func quit() { NSApp.terminate(nil) }
-}
-
-final class HistoryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
-    private let store: ClipboardStore
-    private let onSelect: (ClipboardItem) -> Void
-    private var filtered: [ClipboardItem] = []
-    private let table = NSTableView()
-
-    init(store: ClipboardStore, onSelect: @escaping (ClipboardItem) -> Void) {
-        self.store = store
-        self.onSelect = onSelect
-        self.filtered = store.items
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 500),
-                              styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
-        window.title = "Clipboard History"
-        super.init(window: window)
-        buildUI()
-        window.center()
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    private func buildUI() {
-        guard let content = window?.contentView else { return }
-        let search = NSSearchField(frame: NSRect(x: 20, y: content.bounds.height - 54, width: content.bounds.width - 40, height: 30))
-        search.placeholderString = "Search clips"
-        search.delegate = self
-        search.autoresizingMask = [.width, .minYMargin]
-        content.addSubview(search)
-
-        let scroll = NSScrollView(frame: NSRect(x: 20, y: 20, width: content.bounds.width - 40, height: content.bounds.height - 88))
-        scroll.autoresizingMask = [.width, .height]
-        scroll.hasVerticalScroller = true
-        table.headerView = nil
-        table.rowHeight = 36
-        table.delegate = self
-        table.dataSource = self
-        table.target = self
-        table.doubleAction = #selector(chooseSelected)
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("clip"))
-        column.resizingMask = .autoresizingMask
-        table.addTableColumn(column)
-        scroll.documentView = table
-        content.addSubview(scroll)
-    }
-
-    func controlTextDidChange(_ obj: Notification) {
-        guard let search = obj.object as? NSSearchField else { return }
-        let query = search.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        filtered = query.isEmpty ? store.items : store.items.filter { $0.preview.localizedCaseInsensitiveContains(query) }
-        table.reloadData()
-    }
-
-    func numberOfRows(in tableView: NSTableView) -> Int { filtered.count }
-
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let label = NSTextField(labelWithString: filtered[row].preview)
-        label.frame = NSRect(x: 8, y: 3, width: tableView.bounds.width - 16, height: 30)
-        label.autoresizingMask = [.width]
-        label.lineBreakMode = .byTruncatingTail
-        label.font = .systemFont(ofSize: 14)
-        return label
-    }
-
-    @objc private func chooseSelected() {
-        guard table.selectedRow >= 0, table.selectedRow < filtered.count else { return }
-        onSelect(filtered[table.selectedRow])
-        close()
-    }
 }
 
 let app = NSApplication.shared
