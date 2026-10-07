@@ -19,9 +19,11 @@ Copyclip appears as a paperclip in the menu bar. To start it automatically, turn
 
 ## Privacy
 
-Copyclip has no networking code: no analytics, no accounts, no sync. Your clipboard history never leaves your Mac.
+Your clipboard history never leaves your Mac. Copyclip has no analytics, no accounts, and no sync.
 
-It is stored in `~/Library/Application Support/Copyclip`, protected by your macOS login (and FileVault, if it's on). Items that password managers mark as concealed are never recorded. **Delete All History…** in the menu removes everything.
+Its only network connection is the update check. If you allow it, Copyclip downloads [`appcast.xml`](appcast.xml), a list of versions, from GitHub once a day. Like any download, GitHub sees your IP address and Copyclip's version. Nothing else is sent. Turn it off in Preferences, or check by hand with **Check for Updates…** in the menu.
+
+Your history is stored in `~/Library/Application Support/Copyclip`, protected by your macOS login (and FileVault, if it's on). Items that password managers mark as concealed are never recorded. **Delete All History…** in the menu removes everything.
 
 ## Build from source
 

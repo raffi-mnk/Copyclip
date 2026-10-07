@@ -1,8 +1,14 @@
 import AppKit
+import Sparkle
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let store = ClipboardStore()
     private let settings = AppSettings()
+    private let updateDriver = UpdateUserDriver()
+    private lazy var updater = SPUUpdater(hostBundle: .main, applicationBundle: .main,
+                                          userDriver: updateDriver, delegate: nil)
+    /// An update found by a scheduled check, offered in the menu instead of a window behind other apps.
+    private var availableUpdateVersion: String?
     private let pasteboard = NSPasteboard.general
     private var lastChangeCount = 0
     private var timer: Timer?
@@ -13,7 +19,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let menu = NSMenu()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        settings.migrateLegacyDefaults()
         NSApp.setActivationPolicy(.accessory)
+        updateDriver.onScheduledUpdateChange = { [weak self] version in
+            self?.availableUpdateVersion = version
+            self?.updateStatusIcon()
+        }
+        do {
+            try updater.start()
+        } catch {
+            NSLog("Copyclip couldn't start checking for updates: \(error.localizedDescription)")
+        }
         statusItem = NSStatusBar.system.statusItem(withLength: 22)
         updateStatusIcon()
         store.onChange = { [weak self] in self?.historyController?.reload() }
@@ -26,13 +42,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func updateStatusIcon() {
         if let button = statusItem.button {
-            let name = settings.privateModeEnabled ? "eye.slash" : "paperclip"
-            let symbol = NSImage(systemSymbolName: name, accessibilityDescription: "Copyclip")?
+            let name = settings.privateModeEnabled ? "eye.slash"
+                : availableUpdateVersion != nil ? "paperclip.badge.ellipsis" : "paperclip"
+            let symbol = (NSImage(systemSymbolName: name, accessibilityDescription: "Copyclip")
+                ?? NSImage(systemSymbolName: "paperclip", accessibilityDescription: "Copyclip"))?
                 .withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
             symbol?.isTemplate = true
             button.image = symbol
             button.imagePosition = .imageOnly
-            button.toolTip = settings.privateModeEnabled ? "Copyclip — Private Mode" : "Copyclip"
+            button.toolTip = settings.privateModeEnabled ? "Copyclip — Private Mode"
+                : availableUpdateVersion.map { "Copyclip — version \($0) is available" } ?? "Copyclip"
         }
     }
 
@@ -67,6 +86,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let heading = NSMenuItem(title: settings.privateModeEnabled ? "Private Mode — recording paused" : "Select a clip to add to your clipboard", action: nil, keyEquivalent: "")
         heading.isEnabled = false
         menu.addItem(heading)
+        if let version = availableUpdateVersion {
+            let update = NSMenuItem(title: "Update to Copyclip \(version)…", action: #selector(showAvailableUpdate), keyEquivalent: "")
+            update.target = self
+            update.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil)
+            menu.addItem(update)
+        }
         menu.addItem(.separator())
 
         if store.items.isEmpty {
@@ -116,6 +141,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let about = NSMenuItem(title: "About Copyclip", action: #selector(showAbout), keyEquivalent: "")
         about.target = self
         menu.addItem(about)
+        let updates = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updates.target = self
+        menu.addItem(updates)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit Copyclip", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
@@ -134,6 +162,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if item.isPinned { entry.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Pinned") }
         menu.addItem(entry)
     }
+
+    @objc private func checkForUpdates() { updater.checkForUpdates() }
+
+    @objc private func showAvailableUpdate() { updateDriver.showPendingUpdate() }
 
     @objc private func togglePrivateMode() {
         settings.privateModeEnabled.toggle()
@@ -161,7 +193,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func showPreferences() {
         if preferencesController == nil {
-            preferencesController = PreferencesWindowController(settings: settings) { [weak self] limit in
+            preferencesController = PreferencesWindowController(settings: settings,
+                                                                updater: updater) { [weak self] limit in
                 self?.store.enforceLimit(limit)
             }
         }

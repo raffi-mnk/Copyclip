@@ -1,5 +1,6 @@
 import AppKit
 import ServiceManagement
+import Sparkle
 import UniformTypeIdentifiers
 
 private final class IgnoredAppCellView: NSTableCellView {
@@ -32,19 +33,22 @@ private final class IgnoredAppCellView: NSTableCellView {
 final class PreferencesWindowController: NSWindowController, NSWindowDelegate,
                                          NSTableViewDataSource, NSTableViewDelegate {
     private let settings: AppSettings
+    private let updater: SPUUpdater
     private let onHistoryLimitChanged: (Int) -> Void
     private let menuPopup = NSPopUpButton()
     private let historyPopup = NSPopUpButton()
     private let table = NSTableView()
     private let removeButton = NSButton()
     private let loginButton = NSButton()
+    private let updatesButton = NSButton()
     private let emptyLabel = NSTextField(labelWithString: "No apps ignored yet")
     private var iconCache: [String: NSImage] = [:]
 
-    init(settings: AppSettings, onHistoryLimitChanged: @escaping (Int) -> Void) {
+    init(settings: AppSettings, updater: SPUUpdater, onHistoryLimitChanged: @escaping (Int) -> Void) {
         self.settings = settings
+        self.updater = updater
         self.onHistoryLimitChanged = onHistoryLimitChanged
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 700),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 734),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Copyclip Preferences"
         super.init(window: window)
@@ -54,7 +58,11 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate,
     }
 
     // Login items can be changed in System Settings, so re-read the status whenever the window comes forward.
-    func windowDidBecomeKey(_ notification: Notification) { syncLoginButton() }
+    func windowDidBecomeKey(_ notification: Notification) {
+        syncLoginButton()
+        // Sparkle can change this setting from its own prompt, so read it each time the window opens.
+        updatesButton.state = updater.automaticallyChecksForUpdates ? .on : .off
+    }
 
     private func syncLoginButton() {
         loginButton.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -65,13 +73,13 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate,
     private func buildUI() {
         guard let window else { return }
         let content = GlassStyle.prepare(window)
-        GlassStyle.label("Preferences", in: content, frame: NSRect(x: 32, y: 612, width: 500, height: 39),
+        GlassStyle.label("Preferences", in: content, frame: NSRect(x: 32, y: 646, width: 500, height: 39),
                          size: 27, weight: .bold)
         GlassStyle.label("Make your clipboard work the way you do.", in: content,
-                         frame: NSRect(x: 33, y: 586, width: 500, height: 22),
+                         frame: NSRect(x: 33, y: 620, width: 500, height: 22),
                          size: 13, color: .secondaryLabelColor)
 
-        let general = GlassStyle.card(NSRect(x: 24, y: 395, width: 532, height: 170), in: content)
+        let general = GlassStyle.card(NSRect(x: 24, y: 429, width: 532, height: 170), in: content)
         GlassStyle.sectionLabel("History limits", in: general, frame: NSRect(x: 24, y: 137, width: 300, height: 17))
         GlassStyle.label("Clips shown in menu", in: general, frame: NSRect(x: 24, y: 98, width: 250, height: 18),
                          size: 14, weight: .medium)
@@ -101,7 +109,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate,
                          frame: NSRect(x: 25, y: 17, width: 480, height: 18),
                          size: 11, color: .secondaryLabelColor)
 
-        let ignored = GlassStyle.card(NSRect(x: 24, y: 128, width: 532, height: 250), in: content)
+        let ignored = GlassStyle.card(NSRect(x: 24, y: 162, width: 532, height: 250), in: content)
         GlassStyle.sectionLabel("Ignored apps", in: ignored, frame: NSRect(x: 24, y: 217, width: 300, height: 17))
         GlassStyle.label("Copies made in these apps are not saved to history.", in: ignored,
                          frame: NSRect(x: 24, y: 194, width: 480, height: 20),
@@ -147,15 +155,26 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate,
         removeButton.isEnabled = false
         ignored.addSubview(removeButton)
 
-        let startup = GlassStyle.card(NSRect(x: 24, y: 26, width: 532, height: 86), in: content)
-        GlassStyle.sectionLabel("Startup", in: startup, frame: NSRect(x: 24, y: 53, width: 300, height: 17))
+        let startup = GlassStyle.card(NSRect(x: 24, y: 26, width: 532, height: 120), in: content)
+        GlassStyle.sectionLabel("Startup and updates", in: startup, frame: NSRect(x: 24, y: 87, width: 300, height: 17))
         loginButton.title = "Launch Copyclip at login"
         loginButton.setButtonType(.switch)
         loginButton.target = self
         loginButton.action = #selector(toggleLogin)
-        loginButton.frame = NSRect(x: 24, y: 18, width: 360, height: 28)
+        loginButton.frame = NSRect(x: 24, y: 52, width: 360, height: 28)
         syncLoginButton()
         startup.addSubview(loginButton)
+
+        updatesButton.title = "Automatically check for updates"
+        updatesButton.setButtonType(.switch)
+        updatesButton.target = self
+        updatesButton.action = #selector(toggleUpdates)
+        updatesButton.frame = NSRect(x: 24, y: 18, width: 360, height: 28)
+        startup.addSubview(updatesButton)
+    }
+
+    @objc private func toggleUpdates() {
+        updater.automaticallyChecksForUpdates = updatesButton.state == .on
     }
 
     @objc private func menuLimitChanged() { settings.menuLimit = menuPopup.selectedTag() }

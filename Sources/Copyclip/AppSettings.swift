@@ -15,6 +15,17 @@ final class AppSettings {
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
+    /// Copies settings saved under the bundle identifier used before version 1.3.0, once.
+    func migrateLegacyDefaults(from domain: String = "app.copyclip.local") {
+        let migratedKey = prefix + "migratedLegacyDefaults"
+        guard !defaults.bool(forKey: migratedKey) else { return }
+        defaults.set(true, forKey: migratedKey)
+        guard let legacy = defaults.persistentDomain(forName: domain) else { return }
+        for (key, value) in legacy where key.hasPrefix(prefix) && defaults.object(forKey: key) == nil {
+            defaults.set(value, forKey: key)
+        }
+    }
+
     var privateModeEnabled: Bool {
         get { defaults.bool(forKey: prefix + "privateModeEnabled") }
         set {

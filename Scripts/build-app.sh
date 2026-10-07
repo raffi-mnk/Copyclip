@@ -5,6 +5,7 @@ project_dir="${0:A:h:h}"
 cd "$project_dir"
 build_dir="$project_dir/.build"
 mkdir -p "$build_dir/ClangCache" "$build_dir/ModuleCache"
+sparkle_dir=$("$project_dir/Scripts/fetch-sparkle.sh")
 
 # Build an optimized slice for Apple silicon and Intel, then combine them into one universal binary.
 slices=()
@@ -16,6 +17,7 @@ for arch in arm64 x86_64; do
     (cd "$build_dir/$arch" && CLANG_MODULE_CACHE_PATH="$build_dir/ClangCache" \
         SWIFT_MODULE_CACHE_PATH="$build_dir/ModuleCache" \
         swiftc -O -wmo -g -swift-version 5 -target "$arch-apple-macosx13.0" -Xlinker -dead_strip \
+            -F "$sparkle_dir" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
             "$project_dir"/Sources/Copyclip/*.swift -o "$build_dir/Copyclip-$arch")
     slices+=("$build_dir/Copyclip-$arch")
     dwarf_files+=("$build_dir/Copyclip-$arch.dSYM/Contents/Resources/DWARF/Copyclip-$arch")
@@ -34,6 +36,8 @@ rm -rf "$app_dir"
 mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
 cp "$build_dir/Copyclip" "$app_dir/Contents/MacOS/Copyclip"
 strip -S -x "$app_dir/Contents/MacOS/Copyclip"
+mkdir -p "$app_dir/Contents/Frameworks"
+ditto "$sparkle_dir/Sparkle.framework" "$app_dir/Contents/Frameworks/Sparkle.framework"
 cp "$project_dir/Resources/Info.plist" "$app_dir/Contents/Info.plist"
 
 assets_dir="$project_dir/.build/Assets.xcassets/AppIcon.appiconset"

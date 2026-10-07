@@ -21,6 +21,30 @@ This builds the app and packages it as `dist/Copyclip-<version>.dmg`, using the 
 
 Copyclip is signed ad hoc, not with an Apple Developer ID, so macOS blocks its first launch until the user clicks **Open Anyway** in Privacy & Security.
 
+## Releasing
+
+Updates are delivered with [Sparkle](https://sparkle-project.org). `Scripts/fetch-sparkle.sh` downloads the pinned Sparkle version into `.build` and checks its checksum; the build script embeds it in the app.
+
+To publish a version:
+
+1. Add a `## <version>` section to `CHANGELOG.md` and commit it.
+2. Run `./Scripts/release.sh <version>`, for example `./Scripts/release.sh 1.3.0`.
+
+The script sets the version and raises the build number in `Info.plist`, builds the disk image, signs it with the Sparkle key, adds it to `appcast.xml`, then commits and tags `v<version>`. With the GitHub CLI (`gh`) signed in, it also pushes the tag, creates the GitHub Release with the disk image, and pushes `main`; without it, it prints those steps. The app reads `appcast.xml` from `main`, so pushing `main` last makes the update visible only once the download exists.
+
+### Signing key
+
+Sparkle verifies each update with an EdDSA key. The private key is stored in the login keychain of the Mac that made it, and its public key is `SUPublicEDKey` in `Info.plist`. Keep a backup somewhere private, outside this repository:
+
+```sh
+.build/Sparkle-*/bin/generate_keys -x ~/Desktop/copyclip-sparkle-key.txt   # then move it to a password manager and delete the file
+.build/Sparkle-*/bin/generate_keys -f copyclip-sparkle-key.txt             # imports it on another Mac
+```
+
+If the key is lost, existing installs can't verify new updates, and users have to download a new disk image by hand once.
+
+Copyclip is signed ad hoc. Sparkle downloads updates itself, so they don't carry the quarantine flag and open without the first-launch Gatekeeper step.
+
 ## Storage
 
 History is stored in `~/Library/Application Support/Copyclip`:
