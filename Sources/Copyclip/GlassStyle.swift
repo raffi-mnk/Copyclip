@@ -45,6 +45,8 @@ enum GlassStyle {
         window.isMovableByWindowBackground = true
         window.isOpaque = false
         window.backgroundColor = .clear
+        // These windows are kept and reopened, so closing them must not release them.
+        window.isReleasedWhenClosed = false
 
         let content = NSView(frame: window.contentView?.bounds ?? .zero)
         content.autoresizingMask = [.width, .height]

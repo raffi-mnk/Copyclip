@@ -128,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                keyEquivalent: shortcutIndex < 10 ? String(shortcutIndex) : "")
         entry.target = self
         entry.representedObject = item.id.uuidString
-        let text = item.editableText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let text = item.textExcerpt ?? ""
         let fullText = text.isEmpty ? item.preview : text
         entry.toolTip = fullText.count > 500 ? String(fullText.prefix(499)) + "…" : fullText
         if item.isPinned { entry.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Pinned") }

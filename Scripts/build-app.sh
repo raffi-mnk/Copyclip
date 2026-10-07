@@ -3,16 +3,37 @@ set -euo pipefail
 
 project_dir="${0:A:h:h}"
 cd "$project_dir"
-mkdir -p "$project_dir/.build/ClangCache" "$project_dir/.build/ModuleCache"
-CLANG_MODULE_CACHE_PATH="$project_dir/.build/ClangCache" \
-SWIFT_MODULE_CACHE_PATH="$project_dir/.build/ModuleCache" \
-swiftc -O -swift-version 5 -target "$(uname -m)-apple-macosx13.0" \
-    Sources/Copyclip/*.swift -o "$project_dir/.build/Copyclip"
+build_dir="$project_dir/.build"
+mkdir -p "$build_dir/ClangCache" "$build_dir/ModuleCache"
+
+# Build an optimized slice for Apple silicon and Intel, then combine them into one universal binary.
+slices=()
+dwarf_files=()
+for arch in arm64 x86_64; do
+    rm -rf "$build_dir/Copyclip-$arch.dSYM"
+    # Compile inside the build folder, where -g leaves its module files.
+    mkdir -p "$build_dir/$arch"
+    (cd "$build_dir/$arch" && CLANG_MODULE_CACHE_PATH="$build_dir/ClangCache" \
+        SWIFT_MODULE_CACHE_PATH="$build_dir/ModuleCache" \
+        swiftc -O -wmo -g -swift-version 5 -target "$arch-apple-macosx13.0" -Xlinker -dead_strip \
+            "$project_dir"/Sources/Copyclip/*.swift -o "$build_dir/Copyclip-$arch")
+    slices+=("$build_dir/Copyclip-$arch")
+    dwarf_files+=("$build_dir/Copyclip-$arch.dSYM/Contents/Resources/DWARF/Copyclip-$arch")
+done
+lipo -create "${slices[@]}" -output "$build_dir/Copyclip"
+
+# Keep debug symbols next to the app so crash reports can be symbolicated, then strip them from the app.
+dsym_dir="$project_dir/dist/Copyclip.app.dSYM"
+rm -rf "$dsym_dir"
+mkdir -p "$dsym_dir/Contents/Resources/DWARF"
+cp "$build_dir/Copyclip-arm64.dSYM/Contents/Info.plist" "$dsym_dir/Contents/Info.plist"
+lipo -create "${dwarf_files[@]}" -output "$dsym_dir/Contents/Resources/DWARF/Copyclip"
 
 app_dir="$project_dir/dist/Copyclip.app"
 rm -rf "$app_dir"
 mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
-cp "$project_dir/.build/Copyclip" "$app_dir/Contents/MacOS/Copyclip"
+cp "$build_dir/Copyclip" "$app_dir/Contents/MacOS/Copyclip"
+strip -S -x "$app_dir/Contents/MacOS/Copyclip"
 cp "$project_dir/Resources/Info.plist" "$app_dir/Contents/Info.plist"
 
 assets_dir="$project_dir/.build/Assets.xcassets/AppIcon.appiconset"

@@ -29,7 +29,8 @@ private final class IgnoredAppCellView: NSTableCellView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
-final class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
+final class PreferencesWindowController: NSWindowController, NSWindowDelegate,
+                                         NSTableViewDataSource, NSTableViewDelegate {
     private let settings: AppSettings
     private let onHistoryLimitChanged: (Int) -> Void
     private let menuPopup = NSPopUpButton()
@@ -47,8 +48,16 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Copyclip Preferences"
         super.init(window: window)
+        window.delegate = self
         buildUI()
         window.center()
+    }
+
+    // Login items can be changed in System Settings, so re-read the status whenever the window comes forward.
+    func windowDidBecomeKey(_ notification: Notification) { syncLoginButton() }
+
+    private func syncLoginButton() {
+        loginButton.state = SMAppService.mainApp.status == .enabled ? .on : .off
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -145,7 +154,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         loginButton.target = self
         loginButton.action = #selector(toggleLogin)
         loginButton.frame = NSRect(x: 24, y: 18, width: 360, height: 28)
-        loginButton.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        syncLoginButton()
         startup.addSubview(loginButton)
     }
 
@@ -185,13 +194,24 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     }
 
     @objc private func toggleLogin() {
+        let service = SMAppService.mainApp
         do {
-            if loginButton.state == .on { try SMAppService.mainApp.register() }
-            else { try SMAppService.mainApp.unregister() }
+            if loginButton.state == .on { try service.register() }
+            else { try service.unregister() }
         } catch {
-            loginButton.state = loginButton.state == .on ? .off : .on
+            syncLoginButton()
             NSAlert(error: error).runModal()
+            return
         }
+        syncLoginButton()
+        // Registering can succeed while macOS still waits for the user to allow the item in System Settings.
+        guard service.status == .requiresApproval else { return }
+        let alert = NSAlert()
+        alert.messageText = "Allow Copyclip to open at login"
+        alert.informativeText = "macOS needs your approval. Turn on Copyclip in Login Items in System Settings."
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn { SMAppService.openSystemSettingsLoginItems() }
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { settings.ignoredApps.count }

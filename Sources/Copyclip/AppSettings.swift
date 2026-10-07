@@ -25,16 +25,19 @@ final class AppSettings {
 
     var menuLimit: Int {
         get {
-            let saved = defaults.integer(forKey: prefix + "menuLimit")
-            return Self.menuLimitChoices.contains(saved) ? saved : 20
+            guard let saved = defaults.object(forKey: prefix + "menuLimit") as? Int,
+                  Self.menuLimitChoices.contains(saved) else { return 15 }
+            return saved
         }
         set { defaults.set(newValue, forKey: prefix + "menuLimit") }
     }
 
     var historyLimit: Int {
         get {
-            let saved = defaults.integer(forKey: prefix + "historyLimit")
-            return Self.historyLimitChoices.contains(saved) ? saved : 0
+            // A saved 0 means Unlimited, so only a missing value falls back to the default.
+            guard let saved = defaults.object(forKey: prefix + "historyLimit") as? Int,
+                  Self.historyLimitChoices.contains(saved) else { return 100 }
+            return saved
         }
         set { defaults.set(newValue, forKey: prefix + "historyLimit") }
     }

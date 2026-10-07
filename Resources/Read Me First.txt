@@ -1,0 +1,24 @@
+Copyclip — Installing and opening it for the first time
+=======================================================
+
+1. Drag Copyclip into the Applications folder.
+
+2. Open Copyclip from Applications.
+   Copyclip isn't notarized by Apple, so macOS stops it the first time with a
+   message saying it can't verify Copyclip. Click "Done".
+
+3. Open System Settings › Privacy & Security, scroll down to the Security
+   section, and click "Open Anyway" next to the message about Copyclip.
+   Confirm with "Open Anyway" and your password if macOS asks.
+
+Copyclip then opens normally, and you won't be asked again.
+It runs in the menu bar (look for the paperclip icon), not in the Dock.
+
+On macOS 13 and 14 you can also Control-click Copyclip in Applications,
+choose Open, and click Open in the dialog.
+
+Advanced: instead of steps 2–3 you can run this in Terminal:
+
+    xattr -dr com.apple.quarantine /Applications/Copyclip.app
+
+Copyclip keeps your clipboard history on this Mac and never sends it anywhere.

@@ -24,7 +24,7 @@ private final class ClipCellView: NSTableCellView {
 }
 
 final class HistoryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate,
-                                     NSSearchFieldDelegate, NSTextViewDelegate {
+                                     NSSearchFieldDelegate, NSTextViewDelegate, NSWindowDelegate {
     private let store: ClipboardStore
     private let onCopy: (ClipboardItem) -> Void
     private let historyLimit: () -> Int
@@ -57,6 +57,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         window.title = "Clips Management"
         window.minSize = NSSize(width: 900, height: 570)
         super.init(window: window)
+        window.delegate = self
         buildUI()
         window.center()
         if !filtered.isEmpty { table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false) }
@@ -276,7 +277,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         pinButton.title = item.isPinned ? "Unpin from Menu" : "Pin to Menu"
         renameButton.isEnabled = true
 
-        if let text = item.editableText {
+        let content = store.content(for: item)
+        if item.hasText, let text = content?.text {
             originalText = text
             textView.string = text
             textView.isEditable = true
@@ -284,7 +286,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             imageView.isHidden = true
             note.stringValue = "Editing saves plain text and removes formatting from this clip."
             saveButton.isEnabled = false
-        } else if let image = image(for: item) {
+        } else if let content, let image = image(for: content) {
             originalText = nil
             imageView.image = image
             imageView.isHidden = false
@@ -302,9 +304,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
     }
 
-    private func image(for item: ClipboardItem) -> NSImage? {
+    private func image(for content: ClipContent) -> NSImage? {
         let imageTypes = ["public.png", "public.tiff", "public.jpeg", "com.compuserve.gif"]
-        for representation in item.representations where imageTypes.contains(representation.type) {
+        for representation in content.representations where imageTypes.contains(representation.type) {
             if let image = NSImage(data: representation.data) { return image }
         }
         return nil
@@ -361,7 +363,13 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     func controlTextDidChange(_ obj: Notification) { reload() }
 
     func textDidChange(_ notification: Notification) {
-        saveButton.isEnabled = selectedItem?.editableText != nil && textView.string != originalText
+        saveButton.isEnabled = originalText != nil && textView.string != originalText
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        // Release the previewed clip's data while the window is closed; reload() fills it in again.
+        imageView.image = nil
+        textView.string = ""
     }
 
     @objc private func copySelected() {
@@ -370,7 +378,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     @objc private func saveChanges() {
-        guard let item = selectedItem, item.editableText != nil else { return }
+        guard let item = selectedItem, item.hasText else { return }
         store.editText(id: item.id, to: textView.string)
     }
 
