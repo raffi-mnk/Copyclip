@@ -2,6 +2,33 @@ import AppKit
 import ServiceManagement
 import UniformTypeIdentifiers
 
+private final class IgnoredAppCellView: NSTableCellView {
+    let iconView = NSImageView()
+    let nameField = NSTextField(labelWithString: "")
+    let bundleField = NSTextField(labelWithString: "")
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        identifier = NSUserInterfaceItemIdentifier("IgnoredAppCell")
+        iconView.frame = NSRect(x: 12, y: 8, width: 30, height: 30)
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        addSubview(iconView)
+        nameField.frame = NSRect(x: 52, y: 24, width: frame.width - 64, height: 18)
+        nameField.autoresizingMask = [.width]
+        nameField.lineBreakMode = .byTruncatingTail
+        nameField.font = .systemFont(ofSize: 13, weight: .medium)
+        addSubview(nameField)
+        bundleField.frame = NSRect(x: 52, y: 6, width: frame.width - 64, height: 16)
+        bundleField.autoresizingMask = [.width]
+        bundleField.lineBreakMode = .byTruncatingMiddle
+        bundleField.font = .systemFont(ofSize: 11)
+        bundleField.textColor = .secondaryLabelColor
+        addSubview(bundleField)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+}
+
 final class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
     private let settings: AppSettings
     private let onHistoryLimitChanged: (Int) -> Void
@@ -11,11 +38,12 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     private let removeButton = NSButton()
     private let loginButton = NSButton()
     private let emptyLabel = NSTextField(labelWithString: "No apps ignored yet")
+    private var iconCache: [String: NSImage] = [:]
 
     init(settings: AppSettings, onHistoryLimitChanged: @escaping (Int) -> Void) {
         self.settings = settings
         self.onHistoryLimitChanged = onHistoryLimitChanged
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 650),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 700),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Copyclip Preferences"
         super.init(window: window)
@@ -28,15 +56,15 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     private func buildUI() {
         guard let window else { return }
         let content = GlassStyle.prepare(window)
-        GlassStyle.label("Preferences", in: content, frame: NSRect(x: 32, y: 562, width: 500, height: 39),
+        GlassStyle.label("Preferences", in: content, frame: NSRect(x: 32, y: 612, width: 500, height: 39),
                          size: 27, weight: .bold)
         GlassStyle.label("Make your clipboard work the way you do.", in: content,
-                         frame: NSRect(x: 33, y: 536, width: 500, height: 22),
+                         frame: NSRect(x: 33, y: 586, width: 500, height: 22),
                          size: 13, color: .secondaryLabelColor)
 
-        let general = GlassStyle.card(NSRect(x: 24, y: 345, width: 532, height: 170), in: content)
+        let general = GlassStyle.card(NSRect(x: 24, y: 395, width: 532, height: 170), in: content)
         GlassStyle.sectionLabel("History limits", in: general, frame: NSRect(x: 24, y: 137, width: 300, height: 17))
-        GlassStyle.label("Clips shown in menu", in: general, frame: NSRect(x: 24, y: 98, width: 250, height: 23),
+        GlassStyle.label("Clips shown in menu", in: general, frame: NSRect(x: 24, y: 98, width: 250, height: 18),
                          size: 14, weight: .medium)
         menuPopup.frame = NSRect(x: 308, y: 91, width: 200, height: 32)
         for count in AppSettings.menuLimitChoices {
@@ -48,7 +76,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         menuPopup.action = #selector(menuLimitChanged)
         general.addSubview(menuPopup)
 
-        GlassStyle.label("Clips kept in history", in: general, frame: NSRect(x: 24, y: 55, width: 250, height: 23),
+        GlassStyle.label("Clips kept in history", in: general, frame: NSRect(x: 24, y: 55, width: 250, height: 18),
                          size: 14, weight: .medium)
         historyPopup.frame = NSRect(x: 308, y: 48, width: 200, height: 32)
         for count in AppSettings.historyLimitChoices {
@@ -64,30 +92,34 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
                          frame: NSRect(x: 25, y: 17, width: 480, height: 18),
                          size: 11, color: .secondaryLabelColor)
 
-        let ignored = GlassStyle.card(NSRect(x: 24, y: 128, width: 532, height: 200), in: content)
-        GlassStyle.sectionLabel("Ignored apps", in: ignored, frame: NSRect(x: 24, y: 168, width: 300, height: 17))
+        let ignored = GlassStyle.card(NSRect(x: 24, y: 128, width: 532, height: 250), in: content)
+        GlassStyle.sectionLabel("Ignored apps", in: ignored, frame: NSRect(x: 24, y: 217, width: 300, height: 17))
         GlassStyle.label("Copies made in these apps are not saved to history.", in: ignored,
-                         frame: NSRect(x: 24, y: 144, width: 480, height: 20),
+                         frame: NSRect(x: 24, y: 194, width: 480, height: 20),
                          size: 12, color: .secondaryLabelColor)
 
-        let scroll = NSScrollView(frame: NSRect(x: 20, y: 53, width: 492, height: 82))
+        let scroll = NSScrollView(frame: NSRect(x: 12, y: 56, width: 508, height: 130))
         scroll.hasVerticalScroller = true
+        scroll.verticalScrollElasticity = .none
+        scroll.horizontalScrollElasticity = .none
         scroll.borderType = .noBorder
         scroll.drawsBackground = false
-        scroll.wantsLayer = true
-        scroll.layer?.cornerRadius = 10
         table.headerView = nil
-        table.rowHeight = 30
+        table.style = .plain
+        table.intercellSpacing = NSSize(width: 0, height: 0)
+        table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
+        table.rowHeight = 46
         table.backgroundColor = .clear
         table.dataSource = self
         table.delegate = self
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("app"))
-        column.width = 488
+        column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
         scroll.documentView = table
+        table.sizeLastColumnToFit()
         ignored.addSubview(scroll)
 
-        emptyLabel.frame = NSRect(x: 36, y: 84, width: 460, height: 20)
+        emptyLabel.frame = NSRect(x: 36, y: 111, width: 460, height: 20)
         emptyLabel.alignment = .center
         emptyLabel.font = .systemFont(ofSize: 12)
         emptyLabel.textColor = .tertiaryLabelColor
@@ -106,8 +138,8 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         removeButton.isEnabled = false
         ignored.addSubview(removeButton)
 
-        let startup = GlassStyle.card(NSRect(x: 24, y: 32, width: 532, height: 80), in: content)
-        GlassStyle.sectionLabel("Startup", in: startup, frame: NSRect(x: 24, y: 54, width: 300, height: 16))
+        let startup = GlassStyle.card(NSRect(x: 24, y: 26, width: 532, height: 86), in: content)
+        GlassStyle.sectionLabel("Startup", in: startup, frame: NSRect(x: 24, y: 53, width: 300, height: 17))
         loginButton.title = "Launch Copyclip at login"
         loginButton.setButtonType(.switch)
         loginButton.target = self
@@ -166,11 +198,26 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let app = settings.ignoredApps[row]
-        let label = NSTextField(labelWithString: "\(app.name)  ·  \(app.bundleID)")
-        label.frame = NSRect(x: 8, y: 3, width: tableView.bounds.width - 16, height: 20)
-        label.autoresizingMask = [.width]
-        label.lineBreakMode = .byTruncatingMiddle
-        return label
+        let identifier = NSUserInterfaceItemIdentifier("IgnoredAppCell")
+        let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? IgnoredAppCellView
+            ?? IgnoredAppCellView(frame: NSRect(x: 0, y: 0, width: tableView.bounds.width, height: 46))
+        cell.iconView.image = icon(for: app.bundleID)
+        cell.nameField.stringValue = app.name
+        cell.bundleField.stringValue = app.bundleID
+        return cell
+    }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        GlassRowView.make(in: tableView, owner: self)
+    }
+
+    private func icon(for bundleID: String) -> NSImage? {
+        if let cached = iconCache[bundleID] { return cached }
+        let icon = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+            .map { NSWorkspace.shared.icon(forFile: $0.path) }
+            ?? NSImage(systemSymbolName: "app.dashed", accessibilityDescription: nil)
+        iconCache[bundleID] = icon
+        return icon
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {

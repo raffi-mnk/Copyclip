@@ -1,13 +1,5 @@
 import AppKit
 
-private final class ClipRowView: NSTableRowView {
-    override func drawSelection(in dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 4, dy: 2), xRadius: 10, yRadius: 10)
-        NSColor.controlAccentColor.withAlphaComponent(0.22).setFill()
-        path.fill()
-    }
-}
-
 private final class ClipCellView: NSTableCellView {
     let titleField = NSTextField(labelWithString: "")
     let sourceField = NSTextField(labelWithString: "")
@@ -15,12 +7,12 @@ private final class ClipCellView: NSTableCellView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         identifier = NSUserInterfaceItemIdentifier("ClipCell")
-        titleField.frame = NSRect(x: 10, y: 26, width: 230, height: 19)
+        titleField.frame = NSRect(x: 10, y: 26, width: frame.width - 20, height: 19)
         titleField.autoresizingMask = [.width]
         titleField.lineBreakMode = .byTruncatingTail
         titleField.font = .systemFont(ofSize: 13, weight: .medium)
         addSubview(titleField)
-        sourceField.frame = NSRect(x: 10, y: 8, width: 258, height: 16)
+        sourceField.frame = NSRect(x: 10, y: 8, width: frame.width - 20, height: 16)
         sourceField.autoresizingMask = [.width]
         sourceField.lineBreakMode = .byTruncatingTail
         sourceField.font = .systemFont(ofSize: 11)
@@ -107,6 +99,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         listScroll.borderType = .noBorder
         listScroll.drawsBackground = false
         table.headerView = nil
+        table.style = .plain
+        table.intercellSpacing = NSSize(width: 0, height: 0)
+        table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         table.rowHeight = 54
         table.backgroundColor = .clear
         table.delegate = self
@@ -114,9 +109,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         table.target = self
         table.doubleAction = #selector(copySelected)
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("clip"))
-        column.width = 282
+        column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
         listScroll.documentView = table
+        table.sizeLastColumnToFit()
         listCard.addSubview(listScroll)
 
         let deleteAll = GlassStyle.button("Delete All History…", symbol: "trash", target: self,
@@ -317,13 +313,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     func numberOfRows(in tableView: NSTableView) -> Int { filtered.count }
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        let identifier = NSUserInterfaceItemIdentifier("ClipRow")
-        if let existing = tableView.makeView(withIdentifier: identifier, owner: self) as? ClipRowView {
-            return existing
-        }
-        let view = ClipRowView()
-        view.identifier = identifier
-        return view
+        GlassRowView.make(in: tableView, owner: self)
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -337,7 +327,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             let fullTitle = item.isPinned ? "📌  \(item.displayTitle)" : item.displayTitle
             let title = fittedTitle(fullTitle,
                                     font: cell.titleField.font ?? .systemFont(ofSize: 13, weight: .medium),
-                                    width: 225)
+                                    width: (tableColumn?.width ?? tableView.bounds.width) - 24)
             fittedTitleCache[item.id] = title
             cell.titleField.stringValue = title
         }

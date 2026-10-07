@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Copyclip}",
+            "name": "Debug Copyclip",
+            "target": "Copyclip",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Copyclip"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Copyclip}",
+            "name": "Release Copyclip",
+            "target": "Copyclip",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Copyclip"
+        }
+    ]
+}

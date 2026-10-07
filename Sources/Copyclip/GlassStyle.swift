@@ -19,6 +19,24 @@ final class GlassWellView: NSView {
     }
 }
 
+final class GlassRowView: NSTableRowView {
+    static func make(in tableView: NSTableView, owner: Any?) -> GlassRowView {
+        let identifier = NSUserInterfaceItemIdentifier("GlassRow")
+        if let existing = tableView.makeView(withIdentifier: identifier, owner: owner) as? GlassRowView {
+            return existing
+        }
+        let view = GlassRowView()
+        view.identifier = identifier
+        return view
+    }
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 4, dy: 2), xRadius: 10, yRadius: 10)
+        NSColor.controlAccentColor.withAlphaComponent(0.22).setFill()
+        path.fill()
+    }
+}
+
 enum GlassStyle {
     static func prepare(_ window: NSWindow) -> NSView {
         window.titleVisibility = .hidden
