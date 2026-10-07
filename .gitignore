@@ -3,3 +3,6 @@
 dist/
 .DS_Store
 *.xcuserstate
+.vscode/
+# Finder custom folder icon
+Icon?
