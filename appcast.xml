@@ -5,5 +5,17 @@
     <link>https://github.com/raffi-mnk/Copyclip</link>
     <description>Copyclip updates</description>
     <language>en</language>
+    <item>
+      <title>Version 1.3.0</title>
+      <pubDate>Wed, 07 Oct 2026 19:26:22 +0400</pubDate>
+      <sparkle:version>6</sparkle:version>
+      <sparkle:shortVersionString>1.3.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+<ul><li><b>Automatic updates.</b> Copyclip can check for new versions and install them for you. Choose in Preferences.</li><li>Much lower memory use: clip contents stay on disk until you paste or preview them.</li><li>Clipboard formats that can&#x27;t be pasted again later, and single items over 32 MB, are no longer saved.</li><li>New defaults for new installs: 15 clips in the menu and 100 kept in history.</li><li>Runs natively on Intel Macs as well as Apple silicon.</li><li>A new installer disk image with first-launch instructions.</li></ul>
+      ]]></description>
+      <enclosure url="https://github.com/raffi-mnk/Copyclip/releases/download/v1.3.0/Copyclip-1.3.0.dmg" type="application/octet-stream"
+                 sparkle:edSignature="QkukHHdrALODsJPkzmfRHZRDDRLNCESt9I9DXqRbePBOWFxl76E33QGj1YnZjLXq+b4pNgG5RLPWIOkhoRmsCw==" length="4097018"/>
+    </item>
   </channel>
 </rss>
