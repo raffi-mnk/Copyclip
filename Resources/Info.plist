@@ -1,20 +1,38 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-    <key>CFBundleDevelopmentRegion</key><string>en</string>
-    <key>CFBundleExecutable</key><string>Copyclip</string>
-    <key>CFBundleIdentifier</key><string>io.github.raffi-mnk.copyclip</string>
-    <key>CFBundleIconFile</key><string>AppIcon.icns</string>
-    <key>CFBundleIconName</key><string>AppIcon</string>
-    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-    <key>CFBundleName</key><string>Copyclip</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.2.1</string>
-    <key>CFBundleVersion</key><string>5</string>
-    <key>LSMinimumSystemVersion</key><string>13.0</string>
-    <key>LSUIElement</key><true/>
-    <key>SUFeedURL</key><string>https://raw.githubusercontent.com/raffi-mnk/Copyclip/main/appcast.xml</string>
-    <key>SUPublicEDKey</key><string>FJ+76n6wNJgu2IuwJyxQnG1ZKNgceB5rivgiw9HxI6E=</string>
-    <key>SUVerifyUpdateBeforeExtraction</key><true/>
-    <key>NSHumanReadableCopyright</key><string>Copyright © 2026</string>
-</dict></plist>
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>Copyclip</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon.icns</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.raffi-mnk.copyclip</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Copyclip</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.3.0</string>
+	<key>CFBundleVersion</key>
+	<string>5</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026</string>
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/raffi-mnk/Copyclip/main/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>FJ+76n6wNJgu2IuwJyxQnG1ZKNgceB5rivgiw9HxI6E=</string>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+</dict>
+</plist>
